@@ -78,10 +78,12 @@ async def receive(request: Request):
             return {"status": "ok"}
 
         chatwoot_url = f"{settings.chatwoot_base_url}/webhooks/whatsapp/+{target_phone}"
+        import json as _json
         print(f"[webhook] forwarding to {chatwoot_url}")
+        print(f"[webhook] payload: {_json.dumps(payload)[:600]}")
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(chatwoot_url, json=payload)
-            print(f"[webhook] chatwoot response: {r.status_code} {r.text[:200]}")
+            print(f"[webhook] chatwoot response: {r.status_code} {r.text[:300]}")
 
     except Exception as e:
         print(f"[webhook] error: {e}\n{traceback.format_exc()}")
