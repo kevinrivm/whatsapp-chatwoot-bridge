@@ -36,10 +36,10 @@ async def find_or_create_contact(phone: str, name: str = "") -> dict:
         )
         data = r.json()
         print(f"[chatwoot_api] create contact → {r.status_code} {str(data)[:200]}")
-        result = _payload(data)
-        if isinstance(result, list):
-            result = result[0] if result else {}
-        return result
+        payload = data.get("payload", data) if isinstance(data, dict) else data
+        if isinstance(payload, dict) and "contact" in payload:
+            return payload["contact"]
+        return payload
 
 
 async def find_or_create_conversation(contact_id: int) -> dict:
