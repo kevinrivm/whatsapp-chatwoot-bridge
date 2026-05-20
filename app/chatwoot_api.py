@@ -21,8 +21,8 @@ async def find_or_create_contact(phone: str, name: str = "") -> dict:
         )
         search_data = r.json()
         print(f"[chatwoot_api] search {phone} → {r.status_code} {str(search_data)[:200]}")
-        raw = search_data if isinstance(search_data, dict) else {}
-        contacts = raw.get("payload", {}).get("contacts", []) if isinstance(raw.get("payload"), dict) else []
+        payload = search_data.get("payload", []) if isinstance(search_data, dict) else []
+        contacts = payload if isinstance(payload, list) else payload.get("contacts", [])
         for c in contacts:
             stored = (c.get("phone_number") or "").replace("+", "").replace(" ", "")
             if phone in stored or stored in phone:
