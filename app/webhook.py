@@ -71,11 +71,13 @@ async def receive(request: Request):
                         contacts[0]["wa_id"] = normalized
                         print(f"[webhook] normalized {wa_id} → {normalized}")
 
-        if not phone_number:
-            print("[webhook] no display_phone_number in payload, cannot forward")
+        # Use configured phone number if set (avoids trunk-digit mismatch with Meta's display_phone_number)
+        target_phone = settings.chatwoot_whatsapp_phone or phone_number
+        if not target_phone:
+            print("[webhook] no phone number available, cannot forward")
             return {"status": "ok"}
 
-        chatwoot_url = f"{settings.chatwoot_base_url}/webhooks/whatsapp/+{phone_number}"
+        chatwoot_url = f"{settings.chatwoot_base_url}/webhooks/whatsapp/+{target_phone}"
         print(f"[webhook] forwarding to {chatwoot_url}")
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(chatwoot_url, json=payload)

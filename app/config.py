@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     chatwoot_account_id: int
     chatwoot_inbox_id: int
     chatwoot_webhook_secret: str = ""
+    chatwoot_whatsapp_phone: str = ""
 
     class Config:
         env_file = ".env"
