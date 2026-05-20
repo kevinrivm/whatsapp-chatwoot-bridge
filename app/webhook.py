@@ -77,6 +77,13 @@ async def receive(request: Request):
             print("[webhook] no phone number available, cannot forward")
             return {"status": "ok"}
 
+        # Overwrite display_phone_number in every change value so Chatwoot's inbox lookup matches
+        for entry in payload.get("entry", []):
+            for change in entry.get("changes", []):
+                meta = change.get("value", {}).get("metadata", {})
+                if meta:
+                    meta["display_phone_number"] = target_phone
+
         chatwoot_url = f"{settings.chatwoot_base_url}/webhooks/whatsapp/+{target_phone}"
         import json as _json
         print(f"[webhook] forwarding to {chatwoot_url}")
