@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 import re
 
 from fastapi import APIRouter, Request
@@ -32,7 +33,6 @@ async def handle_chatwoot_event(request: Request):
             if not sig or not _verify_signature(raw, sig):
                 return JSONResponse({"status": "unauthorized"}, status_code=401)
 
-        import json
         body = json.loads(raw)
 
         if body.get("event") != "message_created":
@@ -45,6 +45,19 @@ async def handle_chatwoot_event(request: Request):
         if not content:
             return {"status": "no_content"}
 
+        # Identify which inbox sent this reply to find the correct phone_number_id.
+        inbox_id = body.get("inbox_id") or body.get("conversation", {}).get("inbox_id")
+        if not inbox_id:
+            print("[chatwoot-events] no inbox_id in payload")
+            return {"status": "no_inbox"}
+
+        route = settings.route_by_inbox_id(int(inbox_id))
+        if not route:
+            print(f"[chatwoot-events] no route for inbox_id={inbox_id} — check PHONE_ROUTING")
+            return {"status": "no_route"}
+
+        phone_number_id = route["phone_number_id"]
+
         phone = (
             body.get("conversation", {})
             .get("meta", {})
@@ -55,7 +68,7 @@ async def handle_chatwoot_event(request: Request):
         if not phone:
             return {"status": "no_phone"}
 
-        await send_text_message(phone, content)
+        await send_text_message(phone, content, phone_number_id)
         return {"status": "sent"}
 
     except Exception as e:

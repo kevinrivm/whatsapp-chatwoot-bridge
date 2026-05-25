@@ -1,4 +1,5 @@
 import copy
+import json as _json
 import re
 import traceback
 
@@ -18,6 +19,11 @@ def _is_bsuid(value: str) -> bool:
 
 
 def _normalize(value: str) -> str:
+    """Strip non-digits and fix missing trunk digit for Mexican numbers.
+
+    Mexico: 52XXXXXXXXXX (12 digits, no trunk) → 521XXXXXXXXXX (13 digits).
+    Extend here for other countries that have the same trunk-digit issue (e.g. Argentina 549...).
+    """
     digits = re.sub(r"\D", "", value or "")
     if digits.startswith("52") and not digits.startswith("521") and len(digits) == 12:
         return "521" + digits[2:]
@@ -43,51 +49,61 @@ async def receive(request: Request):
             return {"status": "ignored"}
 
         payload = copy.deepcopy(body)
-        phone_number = None
 
+        # Extract phone_number_id from the first change to find the routing entry.
+        # All changes in a single webhook payload come from the same phone number.
+        phone_number_id = None
+        for entry in payload.get("entry", []):
+            for change in entry.get("changes", []):
+                phone_number_id = change.get("value", {}).get("metadata", {}).get("phone_number_id", "")
+                if phone_number_id:
+                    break
+            if phone_number_id:
+                break
+
+        route = settings.route_by_phone_number_id(phone_number_id) if phone_number_id else None
+        if not route:
+            print(f"[webhook] no route for phone_number_id={phone_number_id!r} — check PHONE_ROUTING")
+            return {"status": "ok"}
+
+        target_phone = route["chatwoot_phone"]
+
+        # Normalize contacts in every change:
+        # 1. Replace BSUID in wa_id with the real phone from `from` field.
+        # 2. Normalize trunk digit (e.g. Mexico 52XXXXXXXXXX → 521XXXXXXXXXX).
+        # 3. Overwrite display_phone_number with target_phone so Chatwoot's
+        #    internal inbox lookup matches (real Meta payloads include trunk digit
+        #    in display_phone_number but inboxes are registered without it).
         for entry in payload.get("entry", []):
             for change in entry.get("changes", []):
                 value = change.get("value", {})
 
-                if not phone_number:
-                    phone_number = value.get("metadata", {}).get("display_phone_number", "")
-
                 contacts = value.get("contacts", [])
                 messages = value.get("messages", [])
-                if not messages or not contacts:
-                    continue
 
-                wa_id = contacts[0].get("wa_id", "")
-                from_number = messages[0].get("from", "")
+                if messages and contacts:
+                    wa_id = contacts[0].get("wa_id", "")
+                    from_number = messages[0].get("from", "")
 
-                if _is_bsuid(wa_id):
-                    normalized = _normalize(from_number)
-                    contacts[0]["wa_id"] = normalized
-                    print(f"[webhook] BSUID {wa_id} → {normalized}")
-                else:
-                    # Normalize even regular numbers (e.g. missing trunk digit)
-                    normalized = _normalize(wa_id or from_number)
-                    if normalized != wa_id:
+                    if _is_bsuid(wa_id):
+                        normalized = _normalize(from_number)
                         contacts[0]["wa_id"] = normalized
-                        print(f"[webhook] normalized {wa_id} → {normalized}")
+                        print(f"[webhook] BSUID {wa_id} → {normalized}")
+                    else:
+                        normalized = _normalize(wa_id or from_number)
+                        if normalized != wa_id:
+                            contacts[0]["wa_id"] = normalized
+                            print(f"[webhook] normalized {wa_id} → {normalized}")
 
-        # Use configured phone number if set (avoids trunk-digit mismatch with Meta's display_phone_number)
-        target_phone = settings.chatwoot_whatsapp_phone or phone_number
-        if not target_phone:
-            print("[webhook] no phone number available, cannot forward")
-            return {"status": "ok"}
-
-        # Overwrite display_phone_number in every change value so Chatwoot's inbox lookup matches
-        for entry in payload.get("entry", []):
-            for change in entry.get("changes", []):
-                meta = change.get("value", {}).get("metadata", {})
+                meta = value.get("metadata", {})
                 if meta:
                     meta["display_phone_number"] = target_phone
 
         chatwoot_url = f"{settings.chatwoot_base_url}/webhooks/whatsapp/+{target_phone}"
-        import json as _json
+        print(f"[webhook] phone_number_id={phone_number_id} → inbox phone={target_phone}")
         print(f"[webhook] forwarding to {chatwoot_url}")
         print(f"[webhook] payload: {_json.dumps(payload)[:600]}")
+
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(chatwoot_url, json=payload)
             print(f"[webhook] chatwoot response: {r.status_code} {r.text[:300]}")
